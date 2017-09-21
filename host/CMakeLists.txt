@@ -276,12 +276,27 @@ SET(Boost_ADDITIONAL_VERSIONS
 )
 FIND_PACKAGE(Boost 1.53 COMPONENTS ${BOOST_REQUIRED_COMPONENTS})
 
+SET(Boost_LIBRARY_DIRS $ENV{Boost_LIBRARY_DIRS})
+SET(Boost_INCLUDE_DIRS $ENV{Boost_INCLUDE_DIRS})
+
 INCLUDE_DIRECTORIES(${Boost_INCLUDE_DIRS})
 LINK_DIRECTORIES(${Boost_LIBRARY_DIRS})
 
 MESSAGE(STATUS "Boost include directories: ${Boost_INCLUDE_DIRS}")
 MESSAGE(STATUS "Boost library directories: ${Boost_LIBRARY_DIRS}")
 MESSAGE(STATUS "Boost libraries: ${Boost_LIBRARIES}")
+
+########################################################################
+# Setup Bardy
+########################################################################
+INCLUDE_DIRECTORIES($ENV{BardyIncDir})
+INCLUDE_DIRECTORIES($ENV{BardyIncDir}\\ctrladmpro)
+
+LINK_DIRECTORIES($ENV{BardyLibDir})
+
+MESSAGE(STATUS "")
+MESSAGE(STATUS "Bardy include directories: $ENV{BardyIncDir}")
+MESSAGE(STATUS "Bardy library directories: $ENV{BardyLibDir}")
 
 ########################################################################
 # Additional settings for build environment
