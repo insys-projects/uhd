@@ -1710,7 +1710,7 @@ public:
         }
     }
 
-private:
+protected:
     device::sptr _dev;
     property_tree::sptr _tree;
     bool _is_device3;
@@ -1930,6 +1930,61 @@ private:
     }
 };
 
+/***********************************************************************
+* Multi USRP InSys Implementation
+**********************************************************************/
+class multi_usrp_is_impl: public multi_usrp_impl {
+	rx_streamer::sptr m_rx_streamer;
+
+public:
+	multi_usrp_is_impl(const device_addr_t &addr):
+		multi_usrp_impl(addr)
+	{
+	}
+
+	tune_result_t set_rx_freq(const tune_request_t &tune_request, size_t chan) 
+	{
+		tune_result_t result;
+
+		return result;
+	}
+
+	void set_rx_gain(double gain, const std::string &name, size_t chan)
+	{
+	}
+
+	void set_rx_antenna(const std::string &ant, size_t chan) 
+	{
+	}
+
+	std::string get_pp_string(void) {
+		std::string buff = str(boost::format(
+			"%s USRP:\n"
+			"  Device: %s\n"
+		)
+			% ((get_num_mboards() > 1) ? "Multi" : "Single")
+			% (_tree->access<std::string>("/name").get())
+		);
+
+		return buff;
+	}
+
+	time_spec_t get_time_now(size_t mboard = 0) {
+		time_spec_t time_spec;
+		return time_spec;
+	}
+
+	rx_streamer::sptr get_rx_stream(const stream_args_t &args) {
+		m_rx_streamer = this->get_device()->get_rx_stream(args);
+		return m_rx_streamer;
+	}
+
+	void issue_stream_cmd(const stream_cmd_t &stream_cmd, size_t chan) {
+		if(m_rx_streamer)
+			m_rx_streamer->issue_stream_cmd(stream_cmd);
+	}
+};
+
 multi_usrp::~multi_usrp(void){
     /* NOP */
 }
@@ -1939,5 +1994,14 @@ multi_usrp::~multi_usrp(void){
  **********************************************************************/
 multi_usrp::sptr multi_usrp::make(const device_addr_t &dev_addr){
     UHD_LOG << "multi_usrp::make with args " << dev_addr.to_pp_string() << std::endl;
-    return sptr(new multi_usrp_impl(dev_addr));
+
+	uhd::device_addrs_t device_addrs = uhd::device::find(dev_addr);
+
+	if(device_addrs.size() == 0) 
+		return sptr(new multi_usrp_impl(dev_addr));
+
+	if(device_addrs[0].has_key("lid"))
+		return sptr(new multi_usrp_is_impl(dev_addr));
+		
+	return sptr(new multi_usrp_impl(dev_addr));
 }

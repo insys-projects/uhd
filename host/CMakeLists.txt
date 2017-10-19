@@ -287,10 +287,13 @@ MESSAGE(STATUS "Boost library directories: ${Boost_LIBRARY_DIRS}")
 MESSAGE(STATUS "Boost libraries: ${Boost_LIBRARIES}")
 
 ########################################################################
-# Setup Bardy
+# Setup Bardy and Gipcy
 ########################################################################
+SET(GipcyDir $ENV{BardyDir}\\gipcy)
+
 INCLUDE_DIRECTORIES($ENV{BardyIncDir})
 INCLUDE_DIRECTORIES($ENV{BardyIncDir}\\ctrladmpro)
+INCLUDE_DIRECTORIES(${GipcyDir}\\include)
 
 LINK_DIRECTORIES($ENV{BardyLibDir})
 

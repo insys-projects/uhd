@@ -38,6 +38,7 @@ UHD_INSTALL(FILES
     property_tree.ipp
     property_tree.hpp
     stream.hpp
+	stream_is.hpp
     ${CMAKE_CURRENT_BINARY_DIR}/version.hpp
     DESTINATION ${INCLUDE_DIR}/uhd
     COMPONENT headers
