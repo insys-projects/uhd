@@ -189,7 +189,7 @@ S32 rx_streamer_is::AllocBuf(const buffs_type &buffs, size_t nBufSize)
 	m_buf_dscr.blkNum = 1;
 	m_buf_dscr.ppBlk = new PVOID[m_buf_dscr.blkNum];
 	m_buf_dscr.blkSize = nBufSize * sample_size * 2;
-	m_buf_dscr.blkSize = m_buf_dscr.blkSize < 0x400000 ? 0x400000 : m_buf_dscr.blkSize;
+	m_buf_dscr.blkSize = m_buf_dscr.blkSize < 0x200000 ? 0x200000 : m_buf_dscr.blkSize;
 	
 	status = BRD_ctrl(m_hDDC, 0, BRDctrl_STREAM_CBUF_ALLOC, &m_buf_dscr);
 	

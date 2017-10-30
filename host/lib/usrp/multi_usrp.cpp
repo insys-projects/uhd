@@ -1935,6 +1935,11 @@ protected:
 **********************************************************************/
 class multi_usrp_is_impl: public multi_usrp_impl {
 	rx_streamer::sptr m_rx_streamer;
+	
+	fs_path ddc_chans_root(const size_t chan)
+	{
+		return 	"mboards/0/ddc/chans/" + boost::lexical_cast<std::string>(chan);
+	}
 
 public:
 	multi_usrp_is_impl(const device_addr_t &addr):
@@ -1945,6 +1950,8 @@ public:
 	tune_result_t set_rx_freq(const tune_request_t &tune_request, size_t chan) 
 	{
 		tune_result_t result;
+
+		_tree->access<double>(ddc_chans_root(chan) / "FrequencyNCO").set(tune_request.target_freq);
 
 		return result;
 	}

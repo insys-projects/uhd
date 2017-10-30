@@ -106,6 +106,8 @@ private:
 	S32 SdramSettings(BRD_Handle hADC, ULONG &bBuf_size, ULONG ddc_on, ULONG mem_mode);
 
 	void DisplayError(S32 status, const char *funcName, const BRDCHAR *cmd_str);
+
+	void SetFrequencyNCO(int nChan, double dFreqNCO);
 };
 
 #endif // INCLUDED_BAMBP_IMPL_HPP

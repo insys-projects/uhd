@@ -204,7 +204,7 @@ void bambp_impl::ReadIniFile()
 	strcat(iniFilePath, m_iniFileName);
 	char SrvName[32];	// имя службы (без номера)
 
-	sprintf(iniFilePath, "c:\\Program Files\\GNURadio-3.7\\bin\\%s", m_iniFileName);
+	sprintf(iniFilePath, "c:\\Program Files\\GNURadio-3.7\\bin\\exam_ddc.ini");
 
 	GetInifileString(iniFilePath, "Option", "AdcServiceName", "ADC4X16", SrvName, sizeof(SrvName));
 	sprintf(m_AdcSrvName, "%s%d", SrvName, 0); // имя службы ADC (с номером)
@@ -275,12 +275,12 @@ S32	bambp_impl::SetParamSrv()
 
 	m_hADC = BRD_capture(m_handle, 0, &mode, adcName, 10000);
 	
-	if(mode != BRDcapt_SHARED) 
+	if(mode != BRDcapt_EXCLUSIVE)
 		BRDC_printf(_BRDC("%s: Capture mode NON EXCLUSIVE\n"), adcName);
 
 	m_hDDC = BRD_capture(m_handle, 0, &mode, ddcName, 10000);
 	
-	if(mode != BRDcapt_SHARED)
+	if(mode != BRDcapt_EXCLUSIVE)
 		BRDC_printf(_BRDC("%s: Capture mode NON EXCLUSIVE\n"), ddcName);
 	
 	if(m_hADC > 0 && m_hDDC > 0)
@@ -301,6 +301,8 @@ S32	bambp_impl::SetParamSrv()
 		
 		BRDC_mbstobcs(ddcSrvName, m_DdcSrvName, MAX_PATH);
 		BRDC_sprintf(iniSectionName, _BRDC("device0_%s"), ddcSrvName);
+
+		BRDC_sprintf(filePath, _BRDC("c:\\Program Files\\GNURadio-3.7\\bin\\exam_ddc.ini"));
 
 		//BRDCHAR Buffer[128];
 		//BRDCHAR* endptr;
@@ -800,12 +802,31 @@ void bambp_impl::DisplayError(S32 status, const char *funcName, const BRDCHAR *c
 	BRDC_printf(_BRDC("%s"), msg);
 }
 
+void bambp_impl::SetFrequencyNCO(int chan, double dFreqNCO)
+{
+	BRD_ValChan rValChan;
+
+	rValChan.chan = chan;
+	rValChan.value = dFreqNCO;
+
+	BRD_ctrl(m_hDDC, 0, BRDctrl_DDC_SETFC, &rValChan);
+}
+
 void bambp_impl::setup_mb(const size_t mb_i, const uhd::device_addr_t &dev_addr)
 {
+	int i;
+
 	const fs_path mb_path = "/mboards/" + boost::lexical_cast<std::string>(mb_i);
+	const fs_path ddc_chans_path = mb_path + "/ddc/chans";
 	std::string product_name = "AMBPCX";
 
 	_tree->create<std::string>(mb_path / "name").set(product_name);
+
+	for(i = 0; i < 16; i++)
+	{
+		_tree->create<double>(ddc_chans_path / boost::lexical_cast<std::string>(i) / "FrequencyNCO")
+			.add_coerced_subscriber(boost::bind(&bambp_impl::SetFrequencyNCO, this, i, _1));
+	}
 
 	// Запрет изменения параметров
 	ChangeParams(0);
