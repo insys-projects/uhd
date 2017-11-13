@@ -1936,24 +1936,66 @@ protected:
 class multi_usrp_is_impl: public multi_usrp_impl {
 	rx_streamer::sptr m_rx_streamer;
 	
-	fs_path ddc_chans_root(const size_t chan)
+	size_t get_rx_num_chans(size_t mboard)
 	{
-		return 	"mboards/0/ddc/chans/" + boost::lexical_cast<std::string>(chan);
+		return _tree->list(mb_root(mboard) / "rx_channels").size();
 	}
 
+	mboard_chan_pair rx_chan_to_mcp(size_t chan) 
+	{
+		mboard_chan_pair mcp;
+		mcp.chan = chan;
+		for(mcp.mboard = 0; mcp.mboard < get_num_mboards(); mcp.mboard++) 
+		{
+			size_t sss = get_rx_num_chans(mcp.mboard);
+			if(mcp.chan < sss) break;
+			mcp.chan -= sss;
+		}
+		if(mcp.mboard >= get_num_mboards())
+		{
+			throw uhd::index_error(str(boost::format("multi_usrp: RX channel %u out of range for configured RX frontends") % chan));
+		}
+		return mcp;
+	}
+
+	fs_path rx_chan_root(const size_t chan)
+	{
+		mboard_chan_pair mcp = rx_chan_to_mcp(chan);
+
+		return 	"mboards" / boost::lexical_cast<std::string>(mcp.mboard)  / "rx_channels" / boost::lexical_cast<std::string>(mcp.chan);
+	}
+	
 public:
 	multi_usrp_is_impl(const device_addr_t &addr):
 		multi_usrp_impl(addr)
 	{
 	}
 
+	void set_rx_rate(double rate, size_t chan) 
+	{
+
+	}
+
+	double get_rx_freq(size_t chan) 
+	{
+		return 0;
+	}
+
 	tune_result_t set_rx_freq(const tune_request_t &tune_request, size_t chan) 
 	{
 		tune_result_t result;
 
-		_tree->access<double>(ddc_chans_root(chan) / "FrequencyNCO").set(tune_request.target_freq);
+		_tree->access<double>(rx_chan_root(chan) / "frequency_nco").set(tune_request.target_freq);
 
 		return result;
+	}
+
+	double get_rx_rate(size_t chan) {
+		return 0;
+	}
+
+	void set_rx_bandwidth(double bandwidth, size_t chan) {
+		
 	}
 
 	void set_rx_gain(double gain, const std::string &name, size_t chan)

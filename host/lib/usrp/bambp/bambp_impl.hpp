@@ -23,6 +23,8 @@
 #include <uhd/stream_is.hpp>
 #include <uhd/usrp/subdev_spec.hpp>
 
+#include <vector>
+
 #include "brd.h"
 #include "ctrlddc.h"
 
@@ -36,7 +38,6 @@ class bambp_impl: public uhd::device
 	BRD_Handle	m_handle;
 
 	ULONG		m_MemAsFifo;
-	int			m_isChangeParams;
 
 	char		m_iniFileName[256];
 
@@ -57,6 +58,8 @@ class bambp_impl: public uhd::device
 
 	BRD_Handle	m_hADC;
 	BRD_Handle	m_hDDC;
+
+	std::vector<int> m_vChannelNumbers;
 
 	int			m_ver;
 
@@ -89,11 +92,6 @@ public:
 	virtual bool recv_async_msg(uhd::async_metadata_t &async_metadata, double timeout);
 
 private:
-	// Запрет/разрешение изменения параметров
-	void ChangeParams(int isChange);
-	// Установка параметров
-	void SetParams();
-
 	void update_clock_source(const std::string &source);
 	void update_rx_subdev_spec(const uhd::usrp::subdev_spec_t &spec);
 	void update_rx_samp_rate(const double rate);
@@ -108,6 +106,8 @@ private:
 	void DisplayError(S32 status, const char *funcName, const BRDCHAR *cmd_str);
 
 	void SetFrequencyNCO(int nChan, double dFreqNCO);
+	void SetInputSource(int nADC, int nDDC);
+	void SetChanMask(int nChanMask);
 };
 
 #endif // INCLUDED_BAMBP_IMPL_HPP

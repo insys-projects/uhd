@@ -33,6 +33,8 @@ using namespace std;
 using namespace uhd;
 using namespace uhd::usrp;
 
+#define DDC_CHAN_NUM 16
+
 device_addrs_t bambp_find(const device_addr_t &hint_)
 {
 	device_addrs_t	addrs;
@@ -156,11 +158,11 @@ bambp_impl::bambp_impl(const uhd::device_addr_t &dev_addr)
 	UHD_MSG(status) << "AMBPCX initialization sequence..." << std::endl;
 	_tree->create<std::string>("/name").set("AMBPCX Device");
 
-	this->setup_mb(0, dev_addr);
-
 	ReadIniFile();
 
 	SetParamSrv();
+
+	this->setup_mb(0, dev_addr);
 }
 
 bambp_impl::~bambp_impl()
@@ -806,10 +808,37 @@ void bambp_impl::SetFrequencyNCO(int chan, double dFreqNCO)
 {
 	BRD_ValChan rValChan;
 
-	rValChan.chan = chan;
+	rValChan.chan = m_vChannelNumbers[chan];
 	rValChan.value = dFreqNCO;
 
 	BRD_ctrl(m_hDDC, 0, BRDctrl_DDC_SETFC, &rValChan);
+}
+
+void bambp_impl::SetInputSource(int nADC, int nDDC)
+{
+	BRD_EnVal rEnVal;
+
+	rEnVal.enable = nADC;
+	rEnVal.value = nDDC;
+
+	BRD_ctrl(m_hDDC, 0, BRDctrl_DDC_SETINPSRC, &rEnVal);
+}
+
+void bambp_impl::SetChanMask(int nChanMask)
+{
+	ULONG mask = 1;
+
+	m_vChannelNumbers.clear();
+
+	for(int iChan = 0; iChan < DDC_CHAN_NUM; iChan++)
+	{
+		if(nChanMask & mask)
+			m_vChannelNumbers.push_back(iChan);
+				
+		mask <<= 1;
+	}
+
+	BRD_ctrl(m_hDDC, 0, BRDctrl_DDC_SETCHANMASK, &nChanMask);
 }
 
 void bambp_impl::setup_mb(const size_t mb_i, const uhd::device_addr_t &dev_addr)
@@ -817,19 +846,23 @@ void bambp_impl::setup_mb(const size_t mb_i, const uhd::device_addr_t &dev_addr)
 	int i;
 
 	const fs_path mb_path = "/mboards/" + boost::lexical_cast<std::string>(mb_i);
-	const fs_path ddc_chans_path = mb_path + "/ddc/chans";
+	const fs_path rx_chans_path = mb_path + "/rx_channels";
 	std::string product_name = "AMBPCX";
 
 	_tree->create<std::string>(mb_path / "name").set(product_name);
 
-	for(i = 0; i < 16; i++)
-	{
-		_tree->create<double>(ddc_chans_path / boost::lexical_cast<std::string>(i) / "FrequencyNCO")
-			.add_coerced_subscriber(boost::bind(&bambp_impl::SetFrequencyNCO, this, i, _1));
-	}
+	_tree->create<int>(rx_chans_path / "chan_mask")
+		.add_coerced_subscriber(boost::bind(&bambp_impl::SetChanMask, this, _1))
+		.set(0x1);
 
-	// Запрет изменения параметров
-	ChangeParams(0);
+	for(i = 0; i < DDC_CHAN_NUM; i++)
+	{
+		_tree->create<double>(rx_chans_path / boost::lexical_cast<std::string>(i) / "frequency_nco")
+			.add_coerced_subscriber(boost::bind(&bambp_impl::SetFrequencyNCO, this, i, _1));
+		_tree->create<int>(rx_chans_path / boost::lexical_cast<std::string>(i) / "input_source")
+			.set(0)
+			.add_coerced_subscriber(boost::bind(&bambp_impl::SetInputSource, this, _1, i));
+	}
 
 	_tree->create<std::string>(mb_path / "clock_source" / "value")
 		.set("");
@@ -843,11 +876,6 @@ void bambp_impl::setup_mb(const size_t mb_i, const uhd::device_addr_t &dev_addr)
 
 	////_tree->create<std::string>(mb_path / "rx_dsps" / "0");
 
-	_tree->create<double>(mb_path / "rx_dsps" / "0" / "rate" / "value")
-	//	//.set_coercer(boost::bind(&rx_dsp_core_3000::set_host_rate, perif.ddc, _1))
-	//	.add_coerced_subscriber(boost::bind(&bambp_impl::update_rx_samp_rate, this, _1))
-		.set(0);
-
 	_tree->create<double>(mb_path / "dboards/A/rx_frontends/0/freq/value").set(0);
 	_tree->create<double>(mb_path / "rx_dsps/0/freq/value").set(0);
 	_tree->create<double>(mb_path / "tick_rate");
@@ -858,541 +886,18 @@ void bambp_impl::setup_mb(const size_t mb_i, const uhd::device_addr_t &dev_addr)
 	sensor_value_t val("lo_locked", true, "locked", "unlocked");
 	_tree->create<sensor_value_t>(mb_path / "dboards/A/rx_frontends/0/sensors/lo_locked")
 		.set(val);
-		
-
-	// Разрешение изменения параметров
-	ChangeParams(1);
-
-	// Установка параметров
-	SetParams();
-
-	////////////////////////////////////////////////////////////////////
-	// setup clock sources and properties
-	////////////////////////////////////////////////////////////////////
-	//_tree->create<std::string>(mb_path / "clock_source" / "value")
-	//	.set(AMBPCX_DEFAULT_CLOCK_SOURCE)
-	//	.add_coerced_subscriber(boost::bind(&bambp_impl::update_clock_source, this, boost::ref(mb), _1));
-
-//	mboard_members_t &mb = _mb[mb_i];
-//	mb.initialization_done = false;
-//
-//	std::vector<std::string> eth_addrs;
-//	// Not choosing eth0 based on resource might cause user issues
-//	std::string eth0_addr = dev_addr.has_key("resource") ? dev_addr["resource"] : dev_addr["addr"];
-//	eth_addrs.push_back(eth0_addr);
-//
-//	mb.next_src_addr = 0;   //Host source address for blocks
-//	if(dev_addr.has_key("second_addr")) {
-//		std::string eth1_addr = dev_addr["second_addr"];
-//
-//		// Ensure we do not have duplicate addresses
-//		if(eth1_addr != eth0_addr)
-//			eth_addrs.push_back(eth1_addr);
-//	}
-//
-//	// Initially store the first address provided to setup communication
-//	// Once we read the eeprom, we use it to map IP to its interface
-//	x300_eth_conn_t init;
-//	init.addr = eth_addrs[0];
-//	mb.eth_conns.push_back(init);
-//
-//	mb.xport_path = dev_addr.has_key("resource") ? "nirio" : "eth";
-//	mb.if_pkt_is_big_endian = mb.xport_path != "nirio";
-//
-//	if(mb.xport_path == "nirio")
-//	{
-//		nirio_status status = 0;
-//
-//		std::string rpc_port_name(NIUSRPRIO_DEFAULT_RPC_PORT);
-//		if(dev_addr.has_key("niusrpriorpc_port")) {
-//			rpc_port_name = dev_addr["niusrpriorpc_port"];
-//		}
-//		UHD_MSG(status) << boost::format("Connecting to niusrpriorpc at localhost:%s...\n") % rpc_port_name;
-//
-//		//Instantiate the correct lvbitx object
-//		nifpga_lvbitx::sptr lvbitx;
-//		switch(get_mb_type_from_pcie(dev_addr["resource"], rpc_port_name)) {
-//		case USRP_X300_MB:
-//			lvbitx.reset(new x300_lvbitx(dev_addr["fpga"]));
-//			break;
-//		case USRP_X310_MB:
-//			lvbitx.reset(new x310_lvbitx(dev_addr["fpga"]));
-//			break;
-//		default:
-//			nirio_status_to_exception(status, "Motherboard detection error. Please ensure that you \
-//                    have a valid USRP X3x0, NI USRP-294xR or NI USRP-295xR device and that all the device \
-//                    drivers have loaded successfully.");
-//		}
-//		//Load the lvbitx onto the device
-//		UHD_MSG(status) << boost::format("Using LVBITX bitfile %s...\n") % lvbitx->get_bitfile_path();
-//		mb.rio_fpga_interface.reset(new niusrprio_session(dev_addr["resource"], rpc_port_name));
-//		nirio_status_chain(mb.rio_fpga_interface->open(lvbitx, dev_addr.has_key("download-fpga")), status);
-//		nirio_status_to_exception(status, "x300_impl: Could not initialize RIO session.");
-//
-//		//Tell the quirks object which FIFOs carry TX stream data
-//		const uint32_t tx_data_fifos[2] = {X300_RADIO_DEST_PREFIX_TX, X300_RADIO_DEST_PREFIX_TX + 3};
-//		mb.rio_fpga_interface->get_kernel_proxy()->get_rio_quirks().register_tx_streams(tx_data_fifos, 2);
-//
-//		_tree->create<size_t>(mb_path / "mtu/recv").set(X300_PCIE_RX_DATA_FRAME_SIZE);
-//		_tree->create<size_t>(mb_path / "mtu/send").set(X300_PCIE_TX_DATA_FRAME_SIZE);
-//		_tree->create<double>(mb_path / "link_max_rate").set(X300_MAX_RATE_PCIE);
-//	}
-//
-//	BOOST_FOREACH(const std::string &key, dev_addr.keys())
-//	{
-//		if(key.find("recv") != std::string::npos) mb.recv_args[key] = dev_addr[key];
-//		if(key.find("send") != std::string::npos) mb.send_args[key] = dev_addr[key];
-//	}
-//
-//	if(mb.xport_path == "eth") {
-//		/* This is an ETH connection. Figure out what the maximum supported frame
-//		* size is for the transport in the up and down directions. The frame size
-//		* depends on the host PIC's NIC's MTU settings. To determine the frame size,
-//		* we test for support up to an expected "ceiling". If the user
-//		* specified a frame size, we use that frame size as the ceiling. If no
-//		* frame size was specified, we use the maximum UHD frame size.
-//		*
-//		* To optimize performance, the frame size should be greater than or equal
-//		* to the frame size that UHD uses so that frames don't get split across
-//		* multiple transmission units - this is why the limits passed into the
-//		* 'determine_max_frame_size' function are actually frame sizes. */
-//		frame_size_t req_max_frame_size;
-//		req_max_frame_size.recv_frame_size = (mb.recv_args.has_key("recv_frame_size")) \
-//			? boost::lexical_cast<size_t>(mb.recv_args["recv_frame_size"]) \
-//			: X300_10GE_DATA_FRAME_MAX_SIZE;
-//		req_max_frame_size.send_frame_size = (mb.send_args.has_key("send_frame_size")) \
-//			? boost::lexical_cast<size_t>(mb.send_args["send_frame_size"]) \
-//			: X300_10GE_DATA_FRAME_MAX_SIZE;
-//
-//#if defined UHD_PLATFORM_LINUX
-//		const std::string mtu_tool("ip link");
-//#elif defined UHD_PLATFORM_WIN32
-//		const std::string mtu_tool("netsh");
-//#else
-//		const std::string mtu_tool("ifconfig");
-//#endif
-//
-//		// Detect the frame size on the path to the USRP
-//		try {
-//			frame_size_t pri_frame_sizes = determine_max_frame_size(
-//				eth_addrs.at(0), req_max_frame_size
-//			);
-//
-//			_max_frame_sizes = pri_frame_sizes;
-//			if(eth_addrs.size() > 1) {
-//				frame_size_t sec_frame_sizes = determine_max_frame_size(
-//					eth_addrs.at(1), req_max_frame_size
-//				);
-//
-//				// Choose the minimum of the max frame sizes
-//				// to ensure we don't exceed any one of the links' MTU
-//				_max_frame_sizes.recv_frame_size = std::min(
-//					pri_frame_sizes.recv_frame_size,
-//					sec_frame_sizes.recv_frame_size
-//				);
-//
-//				_max_frame_sizes.send_frame_size = std::min(
-//					pri_frame_sizes.send_frame_size,
-//					sec_frame_sizes.send_frame_size
-//				);
-//			}
-//		}
-//		catch(std::exception &e) {
-//			UHD_MSG(error) << e.what() << std::endl;
-//		}
-//
-//		if((mb.recv_args.has_key("recv_frame_size"))
-//			&& (req_max_frame_size.recv_frame_size > _max_frame_sizes.recv_frame_size)) {
-//			UHD_MSG(warning)
-//				<< boost::format("You requested a receive frame size of (%lu) but your NIC's max frame size is (%lu).")
-//				% req_max_frame_size.recv_frame_size
-//				% _max_frame_sizes.recv_frame_size
-//				<< std::endl
-//				<< boost::format("Please verify your NIC's MTU setting using '%s' or set the recv_frame_size argument appropriately.")
-//				% mtu_tool << std::endl
-//				<< "UHD will use the auto-detected max frame size for this connection."
-//				<< std::endl;
-//		}
-//
-//		if((mb.recv_args.has_key("send_frame_size"))
-//			&& (req_max_frame_size.send_frame_size > _max_frame_sizes.send_frame_size)) {
-//			UHD_MSG(warning)
-//				<< boost::format("You requested a send frame size of (%lu) but your NIC's max frame size is (%lu).")
-//				% req_max_frame_size.send_frame_size
-//				% _max_frame_sizes.send_frame_size
-//				<< std::endl
-//				<< boost::format("Please verify your NIC's MTU setting using '%s' or set the send_frame_size argument appropriately.")
-//				% mtu_tool << std::endl
-//				<< "UHD will use the auto-detected max frame size for this connection."
-//				<< std::endl;
-//		}
-//
-//		_tree->create<size_t>(mb_path / "mtu/recv").set(_max_frame_sizes.recv_frame_size);
-//		_tree->create<size_t>(mb_path / "mtu/send").set(std::min(_max_frame_sizes.send_frame_size, X300_ETH_DATA_FRAME_MAX_TX_SIZE));
-//		_tree->create<double>(mb_path / "link_max_rate").set(X300_MAX_RATE_10GIGE);
-//	}
-//
-//	//create basic communication
-//	UHD_MSG(status) << "Setup basic communication..." << std::endl;
-//	if(mb.xport_path == "nirio") {
-//		boost::mutex::scoped_lock(pcie_zpu_iface_registry_mutex);
-//		if(get_pcie_zpu_iface_registry().has_key(mb.get_pri_eth().addr)) {
-//			throw uhd::assertion_error("Someone else has a ZPU transport to the device open. Internal error!");
-//		}
-//		else {
-//			mb.zpu_ctrl = x300_make_ctrl_iface_pcie(mb.rio_fpga_interface->get_kernel_proxy());
-//			get_pcie_zpu_iface_registry()[mb.get_pri_eth().addr] = boost::weak_ptr<wb_iface>(mb.zpu_ctrl);
-//		}
-//	}
-//	else {
-//		mb.zpu_ctrl = x300_make_ctrl_iface_enet(udp_simple::make_connected(
-//			mb.get_pri_eth().addr, BOOST_STRINGIZE(X300_FW_COMMS_UDP_PORT)));
-//	}
-//
-//	// Claim device
-//	if(not try_to_claim(mb.zpu_ctrl)) {
-//		throw uhd::runtime_error("Failed to claim device");
-//	}
-//	mb.claimer_task = uhd::task::make(boost::bind(&x300_impl::claimer_loop, this, mb.zpu_ctrl));
-//
-//	//extract the FW path for the X300
-//	//and live load fw over ethernet link
-//	if(dev_addr.has_key("fw"))
-//	{
-//		const std::string x300_fw_image = find_image_path(
-//			dev_addr.has_key("fw") ? dev_addr["fw"] : X300_FW_FILE_NAME
-//		);
-//		x300_load_fw(mb.zpu_ctrl, x300_fw_image);
-//	}
-//
-//	//check compat numbers
-//	//check fpga compat before fw compat because the fw is a subset of the fpga image
-//	this->check_fpga_compat(mb_path, mb);
-//	this->check_fw_compat(mb_path, mb.zpu_ctrl);
-//
-//	mb.fw_regmap = boost::make_shared<fw_regmap_t>();
-//	mb.fw_regmap->initialize(*mb.zpu_ctrl.get(), true);
-//
-//	//store which FPGA image is loaded
-//	mb.loaded_fpga_image = get_fpga_option(mb.zpu_ctrl);
-//
-//	//low speed perif access
-//	mb.zpu_spi = spi_core_3000::make(mb.zpu_ctrl, SR_ADDR(SET0_BASE, ZPU_SR_SPI),
-//		SR_ADDR(SET0_BASE, ZPU_RB_SPI));
-//	mb.zpu_i2c = i2c_core_100_wb32::make(mb.zpu_ctrl, I2C1_BASE);
-//	mb.zpu_i2c->set_clock_rate(X300_BUS_CLOCK_RATE / 2);
-//
-//	////////////////////////////////////////////////////////////////////
-//	// print network routes mapping
-//	////////////////////////////////////////////////////////////////////
-//	/*
-//	const uint32_t routes_addr = mb.zpu_ctrl->peek32(SR_ADDR(X300_FW_SHMEM_BASE, X300_FW_SHMEM_ROUTE_MAP_ADDR));
-//	const uint32_t routes_len = mb.zpu_ctrl->peek32(SR_ADDR(X300_FW_SHMEM_BASE, X300_FW_SHMEM_ROUTE_MAP_LEN));
-//	UHD_VAR(routes_len);
-//	for (size_t i = 0; i < routes_len; i+=1)
-//	{
-//	const uint32_t node_addr = mb.zpu_ctrl->peek32(SR_ADDR(routes_addr, i*2+0));
-//	const uint32_t nbor_addr = mb.zpu_ctrl->peek32(SR_ADDR(routes_addr, i*2+1));
-//	if (node_addr != 0 and nbor_addr != 0)
-//	{
-//	UHD_MSG(status) << boost::format("%u: %s -> %s")
-//	% i
-//	% asio::ip::address_v4(node_addr).to_string()
-//	% asio::ip::address_v4(nbor_addr).to_string()
-//	<< std::endl;
-//	}
-//	}
-//	*/
-//
-//	////////////////////////////////////////////////////////////////////
-//	// setup the mboard eeprom
-//	////////////////////////////////////////////////////////////////////
-//	UHD_MSG(status) << "Loading values from EEPROM..." << std::endl;
-//	x300_mb_eeprom_iface::sptr eeprom16 = x300_mb_eeprom_iface::make(mb.zpu_ctrl, mb.zpu_i2c);
-//	if(dev_addr.has_key("blank_eeprom"))
-//	{
-//		UHD_MSG(warning) << "Obliterating the motherboard EEPROM..." << std::endl;
-//		eeprom16->write_eeprom(0x50, 0, byte_vector_t(256, 0xff));
-//	}
-//	const mboard_eeprom_t mb_eeprom(*eeprom16, "X300");
-//	_tree->create<mboard_eeprom_t>(mb_path / "eeprom")
-//		.set(mb_eeprom)
-//		.add_coerced_subscriber(boost::bind(&x300_impl::set_mb_eeprom, this, mb.zpu_i2c, _1));
-//
-//	bool recover_mb_eeprom = dev_addr.has_key("recover_mb_eeprom");
-//	if(recover_mb_eeprom) {
-//		UHD_MSG(warning) << "UHD is operating in EEPROM Recovery Mode which disables hardware version "
-//			"checks.\nOperating in this mode may cause hardware damage and unstable "
-//			"radio performance!" << std::endl;
-//	}
-//
-//	////////////////////////////////////////////////////////////////////
-//	// parse the product number
-//	////////////////////////////////////////////////////////////////////
-//	std::string product_name = "X300?";
-//	switch(get_mb_type_from_eeprom(mb_eeprom)) {
-//	case USRP_X300_MB:
-//		product_name = "X300";
-//		break;
-//	case USRP_X310_MB:
-//		product_name = "X310";
-//		break;
-//	default:
-//		if(not recover_mb_eeprom)
-//			throw uhd::runtime_error("Unrecognized product type.\n"
-//				"Either the software does not support this device in which case please update your driver software to the latest version and retry OR\n"
-//				"The product code in the EEPROM is corrupt and may require reprogramming.");
-//	}
-//	_tree->create<std::string>(mb_path / "name").set(product_name);
-//	_tree->create<std::string>(mb_path / "codename").set("Yetti");
-//
-//	////////////////////////////////////////////////////////////////////
-//	// determine routing based on address match
-//	////////////////////////////////////////////////////////////////////
-//	if(mb.xport_path != "nirio") {
-//		// Discover ethernet interfaces
-//		mb.discover_eth(mb_eeprom, eth_addrs);
-//	}
-//
-//	////////////////////////////////////////////////////////////////////
-//	// read hardware revision and compatibility number
-//	////////////////////////////////////////////////////////////////////
-//	mb.hw_rev = 0;
-//	if(mb_eeprom.has_key("revision") and not mb_eeprom["revision"].empty()) {
-//		try {
-//			mb.hw_rev = boost::lexical_cast<size_t>(mb_eeprom["revision"]);
-//		}
-//		catch(...) {
-//			if(not recover_mb_eeprom)
-//				throw uhd::runtime_error("Revision in EEPROM is invalid! Please reprogram your EEPROM.");
-//		}
-//	}
-//	else {
-//		if(not recover_mb_eeprom)
-//			throw uhd::runtime_error("No revision detected. MB EEPROM must be reprogrammed!");
-//	}
-//
-//	size_t hw_rev_compat = 0;
-//	if(mb.hw_rev >= 7) { //Revision compat was added with revision 7
-//		if(mb_eeprom.has_key("revision_compat") and not mb_eeprom["revision_compat"].empty()) {
-//			try {
-//				hw_rev_compat = boost::lexical_cast<size_t>(mb_eeprom["revision_compat"]);
-//			}
-//			catch(...) {
-//				if(not recover_mb_eeprom)
-//					throw uhd::runtime_error("Revision compat in EEPROM is invalid! Please reprogram your EEPROM.");
-//			}
-//		}
-//		else {
-//			if(not recover_mb_eeprom)
-//				throw uhd::runtime_error("No revision compat detected. MB EEPROM must be reprogrammed!");
-//		}
-//	}
-//	else {
-//		//For older HW just assume that revision_compat = revision
-//		hw_rev_compat = mb.hw_rev;
-//	}
-//
-//	if(hw_rev_compat > X300_REVISION_COMPAT) {
-//		if(not recover_mb_eeprom)
-//			throw uhd::runtime_error(str(boost::format(
-//				"Hardware is too new for this software. Please upgrade to a driver that supports hardware revision %d.")
-//				% mb.hw_rev));
-//	}
-//	else if(mb.hw_rev < X300_REVISION_MIN) { //Compare min against the revision (and not compat) to give us more leeway for partial support for a compat
-//		if(not recover_mb_eeprom)
-//			throw uhd::runtime_error(str(boost::format(
-//				"Software is too new for this hardware. Please downgrade to a driver that supports hardware revision %d.")
-//				% mb.hw_rev));
-//	}
-//
-//	////////////////////////////////////////////////////////////////////
-//	// create clock control objects
-//	////////////////////////////////////////////////////////////////////
-//	UHD_MSG(status) << "Setup RF frontend clocking..." << std::endl;
-//
-//	//Initialize clock control registers. NOTE: This does not configure the LMK yet.
-//	mb.clock = x300_clock_ctrl::make(mb.zpu_spi,
-//		1 /*slaveno*/,
-//		mb.hw_rev,
-//		dev_addr.cast<double>("master_clock_rate", X300_DEFAULT_TICK_RATE),
-//		dev_addr.cast<double>("dboard_clock_rate", X300_DEFAULT_DBOARD_CLK_RATE),
-//		dev_addr.cast<double>("system_ref_rate", X300_DEFAULT_SYSREF_RATE));
-//
-//	//Initialize clock source to use internal reference and generate
-//	//a valid radio clock. This may change after configuration is done.
-//	//This will configure the LMK and wait for lock
-//	update_clock_source(mb, X300_DEFAULT_CLOCK_SOURCE);
-//
-//	////////////////////////////////////////////////////////////////////
-//	// create clock properties
-//	////////////////////////////////////////////////////////////////////
-//	_tree->create<double>(mb_path / "master_clock_rate")
-//		.set_publisher(boost::bind(&x300_clock_ctrl::get_master_clock_rate, mb.clock))
-//		;
-//
-//	UHD_MSG(status) << "Radio 1x clock:" << (mb.clock->get_master_clock_rate() / 1e6)
-//		<< std::endl;
-//
-//	////////////////////////////////////////////////////////////////////
-//	// Create the GPSDO control
-//	////////////////////////////////////////////////////////////////////
-//	static const uint32_t dont_look_for_gpsdo = 0x1234abcdul;
-//
-//	//otherwise if not disabled, look for the internal GPSDO
-//	if(mb.zpu_ctrl->peek32(SR_ADDR(X300_FW_SHMEM_BASE, X300_FW_SHMEM_GPSDO_STATUS)) != dont_look_for_gpsdo)
-//	{
-//		UHD_MSG(status) << "Detecting internal GPSDO.... " << std::flush;
-//		try
-//		{
-//			mb.gps = gps_ctrl::make(x300_make_uart_iface(mb.zpu_ctrl));
-//		}
-//		catch(std::exception &e)
-//		{
-//			UHD_MSG(error) << "An error occurred making GPSDO control: " << e.what() << std::endl;
-//		}
-//		if(mb.gps and mb.gps->gps_detected())
-//		{
-//			BOOST_FOREACH(const std::string &name, mb.gps->get_sensors())
-//			{
-//				_tree->create<sensor_value_t>(mb_path / "sensors" / name)
-//					.set_publisher(boost::bind(&gps_ctrl::get_sensor, mb.gps, name));
-//			}
-//		}
-//		else
-//		{
-//			mb.zpu_ctrl->poke32(SR_ADDR(X300_FW_SHMEM_BASE, X300_FW_SHMEM_GPSDO_STATUS), dont_look_for_gpsdo);
-//		}
-//	}
-//
-//	////////////////////////////////////////////////////////////////////
-//	//clear router?
-//	////////////////////////////////////////////////////////////////////
-//	for(size_t i = 0; i < 512; i++) {
-//		mb.zpu_ctrl->poke32(SR_ADDR(SETXB_BASE, i), 0);
-//	}
-//
-//
-//	////////////////////////////////////////////////////////////////////
-//	// setup time sources and properties
-//	////////////////////////////////////////////////////////////////////
-//	_tree->create<std::string>(mb_path / "time_source" / "value")
-//		.set("internal")
-//		.add_coerced_subscriber(boost::bind(&x300_impl::update_time_source, this, boost::ref(mb), _1));
-//	static const std::vector<std::string> time_sources = boost::assign::list_of("internal")("external")("gpsdo");
-//	_tree->create<std::vector<std::string> >(mb_path / "time_source" / "options").set(time_sources);
-//
-//	//setup the time output, default to ON
-//	_tree->create<bool>(mb_path / "time_source" / "output")
-//		.add_coerced_subscriber(boost::bind(&x300_impl::set_time_source_out, this, boost::ref(mb), _1))
-//		.set(true);
-//
-//	////////////////////////////////////////////////////////////////////
-//	// setup clock sources and properties
-//	////////////////////////////////////////////////////////////////////
-//	_tree->create<std::string>(mb_path / "clock_source" / "value")
-//		.set(X300_DEFAULT_CLOCK_SOURCE)
-//		.add_coerced_subscriber(boost::bind(&x300_impl::update_clock_source, this, boost::ref(mb), _1));
-//
-//	static const std::vector<std::string> clock_source_options = boost::assign::list_of("internal")("external")("gpsdo");
-//	_tree->create<std::vector<std::string> >(mb_path / "clock_source" / "options").set(clock_source_options);
-//
-//	//setup external reference options. default to 10 MHz input reference
-//	_tree->create<std::string>(mb_path / "clock_source" / "external");
-//	static const std::vector<double> external_freq_options = boost::assign::list_of(10e6)(30.72e6)(200e6);
-//	_tree->create<std::vector<double> >(mb_path / "clock_source" / "external" / "freq" / "options")
-//		.set(external_freq_options);
-//	_tree->create<double>(mb_path / "clock_source" / "external" / "value")
-//		.set(mb.clock->get_sysref_clock_rate());
-//	// FIXME the external clock source settings need to be more robust
-//
-//	//setup the clock output, default to ON
-//	_tree->create<bool>(mb_path / "clock_source" / "output")
-//		.add_coerced_subscriber(boost::bind(&x300_clock_ctrl::set_ref_out, mb.clock, _1));
-//
-//	//initialize tick rate (must be done before setting time)
-//	_tree->create<double>(mb_path / "tick_rate")
-//		.add_coerced_subscriber(boost::bind(&device3_impl::update_tx_streamers, this, _1))
-//		.add_coerced_subscriber(boost::bind(&device3_impl::update_rx_streamers, this, _1))
-//		.set(mb.clock->get_master_clock_rate())
-//		;
-//
-//	////////////////////////////////////////////////////////////////////
-//	// and do the misc mboard sensors
-//	////////////////////////////////////////////////////////////////////
-//	_tree->create<sensor_value_t>(mb_path / "sensors" / "ref_locked")
-//		.set_publisher(boost::bind(&x300_impl::get_ref_locked, this, mb));
-//
-//	//////////////// RFNOC /////////////////
-//	const size_t n_rfnoc_blocks = mb.zpu_ctrl->peek32(SR_ADDR(SET0_BASE, ZPU_RB_NUM_CE));
-//	enumerate_rfnoc_blocks(
-//		mb_i,
-//		n_rfnoc_blocks,
-//		X300_XB_DST_PCI + 1, /* base port */
-//		uhd::sid_t(X300_SRC_ADDR0, 0, X300_DST_ADDR + mb_i, 0),
-//		dev_addr,
-//		mb.if_pkt_is_big_endian ? ENDIANNESS_BIG : ENDIANNESS_LITTLE
-//	);
-//	//////////////// RFNOC /////////////////
-//
-//	// If we have a radio, we must configure its codec control:
-//	const std::string radio_blockid_hint = str(boost::format("%d/Radio") % mb_i);
-//	std::vector<rfnoc::block_id_t> radio_ids =
-//		find_blocks<rfnoc::x300_radio_ctrl_impl>(radio_blockid_hint);
-//	if(not radio_ids.empty()) {
-//		if(radio_ids.size() > 2) {
-//			UHD_MSG(warning) << "Too many Radio Blocks found. Using only the first two." << std::endl;
-//			radio_ids.resize(2);
-//		}
-//
-//		BOOST_FOREACH(const rfnoc::block_id_t &id, radio_ids) {
-//			rfnoc::x300_radio_ctrl_impl::sptr radio(get_block_ctrl<rfnoc::x300_radio_ctrl_impl>(id));
-//			mb.radios.push_back(radio);
-//			radio->setup_radio(
-//				mb.zpu_i2c,
-//				mb.clock,
-//				dev_addr.has_key("ignore-cal-file"),
-//				dev_addr.has_key("self_cal_adc_delay")
-//			);
-//		}
-//
-//		////////////////////////////////////////////////////////////////////
-//		// ADC test and cal
-//		////////////////////////////////////////////////////////////////////
-//		if(dev_addr.has_key("self_cal_adc_delay")) {
-//			rfnoc::x300_radio_ctrl_impl::self_cal_adc_xfer_delay(
-//				mb.radios, mb.clock,
-//				boost::bind(&x300_impl::wait_for_clk_locked, this, mb, fw_regmap_t::clk_status_reg_t::LMK_LOCK, _1),
-//				true /* Apply ADC delay */);
-//		}
-//		if(dev_addr.has_key("ext_adc_self_test")) {
-//			rfnoc::x300_radio_ctrl_impl::extended_adc_test(
-//				mb.radios,
-//				dev_addr.cast<double>("ext_adc_self_test", 30));
-//		}
-//		else if(not dev_addr.has_key("recover_mb_eeprom")) {
-//			for(size_t i = 0; i < mb.radios.size(); i++) {
-//				mb.radios.at(i)->self_test_adc();
-//			}
-//		}
-//
-//		////////////////////////////////////////////////////////////////////
-//		// Synchronize times (dboard initialization can desynchronize them)
-//		////////////////////////////////////////////////////////////////////
-//		if(radio_ids.size() == 2) {
-//			this->sync_times(mb, mb.radios[0]->get_time_now());
-//		}
-//
-//	}
-//	else {
-//		UHD_MSG(status) << "No Radio Block found. Assuming radio-less operation." << std::endl;
-//	} /* end of radio block(s) initialization */
-//
-//	mb.initialization_done = true;
 }
 
 rx_streamer::sptr bambp_impl::get_rx_stream(const stream_args_t &args)
 {
+	U32 nMask = 0;
+	U32 i;
+
+	for(i = 0; i < args.channels.size(); i++)
+		nMask += 1 << m_vChannelNumbers[i];
+
+	BRD_ctrl(m_hDDC, 0, BRDctrl_DDC_SETCHANMASK, &nMask);
+
 	rx_streamer::sptr sptr(new uhd::rx_streamer_is(args, m_hADC, m_hDDC));
 
 	return sptr;
@@ -1410,18 +915,6 @@ bool bambp_impl::recv_async_msg(
 )
 {
 	return 0;
-}
-
-// Запрет/разрешение изменения параметров
-void bambp_impl::ChangeParams(int isChange)
-{
-	m_isChangeParams = isChange;
-}
-
-// Установка параметров
-void bambp_impl::SetParams()
-{
-
 }
 
 void bambp_impl::update_clock_source(const std::string &source)
