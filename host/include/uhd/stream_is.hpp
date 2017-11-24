@@ -10,9 +10,13 @@ namespace uhd {
 		BRD_Handle	m_hADC;
 		BRD_Handle	m_hDDC;
 		BRDctrl_StreamCBufAlloc	m_buf_dscr;
-		U08 m_isAlloc;
-		U08 m_isStart;
+		volatile U08 m_isAlloc;
+		volatile U08 m_isStart;
 		stream_args_t m_args;
+		volatile U32 m_write_cnt;
+		volatile U32 m_max_num_samps;
+		volatile U32 m_last_num_samps;
+		volatile U32 m_offset;
 
 	public:
 		rx_streamer_is(const stream_args_t &args, BRD_Handle hADC, BRD_Handle hDDC);
@@ -36,7 +40,7 @@ namespace uhd {
 	private:
 		S32 PrepareStart();
 		void Stop();
-		S32 AllocBuf(const buffs_type &buffs, size_t nBufSize);
+		S32 AllocBuf(const buffs_type &buffs, size_t nsamps_per_buff);
 		U32	GetSampleSize();
 		void ConvertData(void *pDst, void *pSrc, U32 nSize);
 		void sc16tofc32(void *pDst, void *pSrc, U32 nBitsPerSample, U32 nSize);

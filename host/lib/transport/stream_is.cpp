@@ -14,6 +14,11 @@ rx_streamer_is::rx_streamer_is(const stream_args_t &args, BRD_Handle hADC, BRD_H
 
 	m_isAlloc = 0;
 	m_isStart = 0;
+
+	REAL64 dTmp = GetSampleSize() * 2 * m_args.channels.size();
+	m_max_num_samps = floor((REAL64)0x100000 / dTmp);
+	
+	m_last_num_samps = m_max_num_samps;
 }
 
 rx_streamer_is::~rx_streamer_is(void)
@@ -22,11 +27,11 @@ rx_streamer_is::~rx_streamer_is(void)
 
 size_t rx_streamer_is::get_num_channels(void) const
 {
-	return 1;
+	return m_args.channels.size();
 }
 size_t rx_streamer_is::get_max_num_samps(void) const
 {
-	return 1;
+	return m_max_num_samps;
 }
 
 size_t rx_streamer_is::recv(
@@ -39,7 +44,8 @@ size_t rx_streamer_is::recv(
 {
 	S32		status;
 	ULONG	Status = 0;
-	ULONG err = 0;
+	ULONG	err = 0;
+	size_t	cur_num_samps;
 
 	if(m_isStart == 0)
 	{
@@ -52,76 +58,109 @@ size_t rx_streamer_is::recv(
 		m_isAlloc = 1;
 
 		AllocBuf(buffs, nsamps_per_buff);
+
+		// для проверки флагов переполнения разрядной сетки АЦП их надо сбрасывать перед каждым стартом
+		ULONG clr = 0xF;
+		//BRD_ValChan fc_val;
+
+		status = BRD_ctrl(m_hADC, 0, BRDctrl_ADC_CLRBITSOVERFLOW, &clr);
+
+		ULONG flag = BRDstrm_DRQ_HALF;//BRDstrm_DRQ_HALF; // рекомендуется флаг - FIFO наполовину заполнено
+									  //ULONG flag = BRDstrm_DRQ_ALMOST;
+		ULONG tetrad;
+		BRDctrl_StreamCBufStart start_pars;
+		start_pars.isCycle = 1; // без зацикливания 
+
+								// установить источник для работы стрима
+		status = BRD_ctrl(m_hDDC, 0, BRDctrl_DDC_GETSRCSTREAM, &tetrad); // стрим будет работать с DDC
+		status = BRD_ctrl(m_hDDC, 0, BRDctrl_STREAM_SETSRC, &tetrad);
+		status = BRD_ctrl(m_hDDC, 0, BRDctrl_STREAM_SETDRQ, &flag);
+		status = BRD_ctrl(m_hDDC, 0, BRDctrl_DDC_FIFORESET, NULL); // сброс FIFO АЦП
+		status = BRD_ctrl(m_hDDC, 0, BRDctrl_STREAM_RESETFIFO, NULL);
+
+		m_buf_dscr.pStub->totalCounter = 0;
+
+		status = BRD_ctrl(m_hDDC, 0, BRDctrl_STREAM_CBUF_START, &start_pars); // старт ПДП							
+
+		ULONG Enable = 3;
+
+		status = BRD_ctrl(m_hDDC, 0, BRDctrl_DDC_ENABLE, &Enable); // разрешение работы DDC
+
+		Enable = 1;
+
+		status = BRD_ctrl(m_hADC, 0, BRDctrl_ADC_FIFORESET, NULL); // Сброс ФИФО
+		status = BRD_ctrl(m_hADC, 0, BRDctrl_ADC_ENABLE, &Enable); // разрешение работы DDC
+
+		ULONG msTimeout = 5000;
+
+		while(m_buf_dscr.pStub->totalCounter < m_buf_dscr.blkNum)
+			status = BRD_ctrl(m_hDDC, 0, BRDctrl_STREAM_CBUF_WAITBLOCK, &msTimeout);
+		
+		m_write_cnt = m_buf_dscr.pStub->totalCounter - 1;
 	}
 
-	// для проверки флагов переполнения разрядной сетки АЦП их надо сбрасывать перед каждым стартом
-	ULONG clr = 0xF;
-	//BRD_ValChan fc_val;
-
-	status = BRD_ctrl(m_hADC, 0, BRDctrl_ADC_CLRBITSOVERFLOW, &clr);
-
-	ULONG flag = BRDstrm_DRQ_HALF;//BRDstrm_DRQ_HALF; // рекомендуется флаг - FIFO наполовину заполнено
-						   //ULONG flag = BRDstrm_DRQ_ALMOST;
-	ULONG tetrad;
-	BRDctrl_StreamCBufStart start_pars;
-	start_pars.isCycle = 0; // без зацикливания 
-
-	// установить источник для работы стрима
-	status = BRD_ctrl(m_hDDC, 0, BRDctrl_DDC_GETSRCSTREAM, &tetrad); // стрим будет работать с DDC
-	status = BRD_ctrl(m_hDDC, 0, BRDctrl_STREAM_SETSRC, &tetrad);
-	status = BRD_ctrl(m_hDDC, 0, BRDctrl_STREAM_SETDRQ, &flag);
-	status = BRD_ctrl(m_hDDC, 0, BRDctrl_DDC_FIFORESET, NULL); // сброс FIFO АЦП
-	status = BRD_ctrl(m_hDDC, 0, BRDctrl_STREAM_RESETFIFO, NULL);
+	volatile U32 total_cnt = 0;
+	volatile S32 delta_cnt = 0;
+	volatile S32 cur_buf = 0;
+	U08 *pBuf;
 	
-	status = BRD_ctrl(m_hDDC, 0, BRDctrl_STREAM_CBUF_START, &start_pars); // старт ПДП							
+	//printf("m_last_num_samps = %d\n", m_last_num_samps);
+	//printf("nsamps_per_buff = %d\n", nsamps_per_buff);
 
-	ULONG Enable = 3;
-
-	status = BRD_ctrl(m_hDDC, 0, BRDctrl_DDC_ENABLE, &Enable); // разрешение работы DDC
-
-	Enable = 1;
-
-	status = BRD_ctrl(m_hADC, 0, BRDctrl_ADC_FIFORESET, NULL); // Сброс ФИФО
-	status = BRD_ctrl(m_hADC, 0, BRDctrl_ADC_ENABLE, &Enable); // разрешение работы DDC
-
-	Enable = 2;
-	ULONG msTimeout = 5000;
-	status = BRD_ctrl(m_hDDC, 0, BRDctrl_STREAM_CBUF_WAITBUF, &msTimeout);
-	
-	if(BRD_errcmp(status, BRDerr_WAIT_TIMEOUT))
-	{
-		// если вышли по тайм-ауту, то остановимся
-		status = BRD_ctrl(m_hDDC, 0, BRDctrl_DDC_FIFOSTATUS, &Status);
-		BRDC_printf(_BRDC("DDC FIFO Status = 0x%04X\n"), Status);
-		status = BRD_ctrl(m_hDDC, 0, BRDctrl_STREAM_CBUF_STOP, NULL);
-		//DisplayError(status, __FUNCTION__, _BRDC("TIME-OUT"));
-		status = BRD_ctrl(m_hDDC, 0, BRDctrl_DDC_ENABLE, &Enable); // запрет работы DDC
-		err++;
-	}
+	if(m_last_num_samps > nsamps_per_buff)
+		cur_num_samps = nsamps_per_buff;
 	else
-	{
-		status = BRD_ctrl(m_hDDC, 0, BRDctrl_DDC_ENABLE, &Enable); // запрет работы DDC
-	}
-	
-	Enable = 0;
-	status = BRD_ctrl(m_hADC, 0, BRDctrl_ADC_ENABLE, &Enable); // запрет работы ADC
-	
-	if(!err)
-	{
-		status = BRD_ctrl(m_hADC, 0, BRDctrl_ADC_FIFOSTATUS, &Status);
+		cur_num_samps = m_last_num_samps;
 
-		// проверка флагов переполнения разрядной сетки АЦП
-		status = BRD_ctrl(m_hADC, 0, BRDctrl_ADC_ISBITSOVERFLOW, &Status);
-			
-		//if(Status)
-		//	BRDC_printf(_BRDC("ADC Bits OVERFLOW %X  "), Status);
-	}
+	//printf("cur_num_samps = %d\n", cur_num_samps);
 
-	ConvertData(buffs[0], m_buf_dscr.ppBlk[0], nsamps_per_buff * 2);
+	m_last_num_samps -= cur_num_samps;
+
+	//printf("m_last_num_samps = %d\n", m_last_num_samps);
+
+	cur_buf = m_write_cnt % m_buf_dscr.blkNum;
+
+	//printf("cur_buf = %d\n", cur_buf);
+
+	pBuf = (U08*)m_buf_dscr.ppBlk[cur_buf];
+	pBuf += m_offset * GetSampleSize() * 2 * m_args.channels.size();
+
+	//printf("m_offset = %d\n", m_offset);
+
+	ConvertData(buffs[0], pBuf, cur_num_samps * 2);
 
 	//memcpy(buffs[0], m_buf_dscr.ppBlk[0], nsamps_per_buff * 4);
 
-	return nsamps_per_buff;
+	if(m_last_num_samps == 0)
+	{
+		m_last_num_samps = m_max_num_samps;
+		m_write_cnt++;
+		m_offset = 0;
+	}
+	else
+		m_offset += cur_num_samps;
+
+	//printf("m_last_num_samps = %d\n", m_last_num_samps);
+	//printf("m_write_cnt = %d\n", m_write_cnt);
+	//printf("m_offset = %d\n", m_offset);
+
+	total_cnt = m_buf_dscr.pStub->totalCounter;
+	delta_cnt = total_cnt - m_write_cnt;
+
+	//printf("total_cnt = %d\n", total_cnt);
+	//printf("delta_cnt = %d\n", delta_cnt);
+
+/*
+	{
+		printf("!!!!!!!!!!!!!\n");
+	}
+
+	if(delta_cnt < 1)
+	{
+		printf("???????????\n");
+	} */
+	
+	return cur_num_samps;
 }
 
 void rx_streamer_is::issue_stream_cmd(const stream_cmd_t &stream_cmd)
@@ -164,32 +203,43 @@ S32 rx_streamer_is::PrepareStart()
 			return status;
 		}
 
+	m_write_cnt = 0;
+
 	return BRDerr_OK;
 }
 
 void rx_streamer_is::Stop()
 {
+	S32		status;
+
 	m_isStart = 0;
 
 	if(m_isAlloc == 0)
 		return;
 
+	status = BRD_ctrl(m_hDDC, 0, BRDctrl_STREAM_CBUF_STOP, NULL);
+	
+	ULONG Enable = 2;
+
+	status = BRD_ctrl(m_hDDC, 0, BRDctrl_DDC_ENABLE, &Enable); // запрет работы DDC
+	
+	Enable = 0;
+	status = BRD_ctrl(m_hADC, 0, BRDctrl_ADC_ENABLE, &Enable); // запрет работы ADC
+	
 	m_isAlloc = 0;
 	BRD_ctrl(m_hDDC, 0, BRDctrl_STREAM_CBUF_FREE, 0);
 }
 
-S32 rx_streamer_is::AllocBuf(const buffs_type &buffs, size_t nBufSize)
+S32 rx_streamer_is::AllocBuf(const buffs_type &buffs, size_t nsamps_per_buff)
 {
 	S32		status;
 	void*	pBuffer = NULL;
-	U32		sample_size = GetSampleSize();
 
 	m_buf_dscr.dir = BRDstrm_DIR_IN;
 	m_buf_dscr.isCont = 1; // 0 - буфер размещается в пользовательской памяти ПК, 1 - в системной
-	m_buf_dscr.blkNum = 1;
+	m_buf_dscr.blkNum = 20;
 	m_buf_dscr.ppBlk = new PVOID[m_buf_dscr.blkNum];
-	m_buf_dscr.blkSize = nBufSize * sample_size * 2 * m_args.channels.size();
-	m_buf_dscr.blkSize = m_buf_dscr.blkSize < 0x200000 ? 0x200000 : m_buf_dscr.blkSize;
+	m_buf_dscr.blkSize = m_max_num_samps * GetSampleSize() * 2 * m_args.channels.size();
 	
 	status = BRD_ctrl(m_hDDC, 0, BRDctrl_STREAM_CBUF_ALLOC, &m_buf_dscr);
 	

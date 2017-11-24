@@ -842,7 +842,8 @@ public:
     }
 
     meta_range_t get_rx_rates(size_t chan){
-        return _tree->access<meta_range_t>(rx_dsp_root(chan) / "rate" / "range").get();
+		meta_range_t range = _tree->access<meta_range_t>(rx_dsp_root(chan) / "rate" / "range").get();
+		return range;
     }
 
     tune_result_t set_rx_freq(const tune_request_t &tune_request, size_t chan){
@@ -859,15 +860,17 @@ public:
     }
 
     freq_range_t get_rx_freq_range(size_t chan){
-        return make_overall_tune_range(
-            _tree->access<meta_range_t>(rx_rf_fe_root(chan) / "freq" / "range").get(),
-            _tree->access<meta_range_t>(rx_dsp_root(chan) / "freq" / "range").get(),
-            this->get_rx_bandwidth(chan)
-        );
+		freq_range_t range = make_overall_tune_range(
+			_tree->access<meta_range_t>(rx_rf_fe_root(chan) / "freq" / "range").get(),
+			_tree->access<meta_range_t>(rx_dsp_root(chan) / "freq" / "range").get(),
+			this->get_rx_bandwidth(chan)
+		);
+		return range;
     }
 
     freq_range_t get_fe_rx_freq_range(size_t chan){
-        return _tree->access<meta_range_t>(rx_rf_fe_root(chan) / "freq" / "range").get();
+		freq_range_t range = _tree->access<meta_range_t>(rx_rf_fe_root(chan) / "freq" / "range").get();
+		return range;
     }
 
     std::vector<std::string> get_rx_lo_names(size_t chan = 0){
@@ -1114,14 +1117,16 @@ public:
 
     gain_range_t get_rx_gain_range(const std::string &name, size_t chan){
         try {
-            return rx_gain_group(chan)->get_range(name);
+			gain_range_t range = rx_gain_group(chan)->get_range(name);
+			return range;
         } catch (uhd::key_error &) {
             THROW_GAIN_NAME_ERROR(name,chan,rx);
         }
     }
 
     std::vector<std::string> get_rx_gain_names(size_t chan){
-        return rx_gain_group(chan)->get_names();
+		std::vector<std::string> names = rx_gain_group(chan)->get_names();
+		return names;
     }
 
     void set_rx_antenna(const std::string &ant, size_t chan){
@@ -1145,7 +1150,8 @@ public:
     }
 
     meta_range_t get_rx_bandwidth_range(size_t chan){
-        return _tree->access<meta_range_t>(rx_rf_fe_root(chan) / "bandwidth" / "range").get();
+		meta_range_t range = _tree->access<meta_range_t>(rx_rf_fe_root(chan) / "bandwidth" / "range").get();
+		return range;
     }
 
     dboard_iface::sptr get_rx_dboard_iface(size_t chan){
@@ -2006,6 +2012,10 @@ public:
 	{
 	}
 
+	std::string get_rx_antenna(size_t chan) {
+		return "";
+	}
+
 	std::string get_pp_string(void) {
 		std::string buff = str(boost::format(
 			"%s USRP:\n"
@@ -2031,6 +2041,67 @@ public:
 	void issue_stream_cmd(const stream_cmd_t &stream_cmd, size_t chan) {
 		if(m_rx_streamer)
 			m_rx_streamer->issue_stream_cmd(stream_cmd);
+	}
+
+	subdev_spec_t get_tx_subdev_spec(size_t mboard)
+	{
+		subdev_spec_t spec;
+		return spec;
+	}
+
+	std::string get_rx_subdev_name(size_t chan) {
+		return "";
+	}
+
+	double get_master_clock_rate(size_t mboard) {
+		return 0;
+	}
+
+	meta_range_t get_rx_rates(size_t chan) {
+		meta_range_t range(0, 5, 0.1);
+		return range;
+	}
+
+	freq_range_t get_rx_freq_range(size_t chan) {
+		freq_range_t range(0, 4, 0.1);
+		return range;
+	}
+
+	freq_range_t get_fe_rx_freq_range(size_t chan) {
+		freq_range_t range(0, 3, 0.1);
+		return range;
+	}
+
+	double get_rx_gain(const std::string &name, size_t chan) {
+		return 0;
+	}
+
+	double get_rx_bandwidth(size_t chan) {
+		return 0;
+	}
+
+	meta_range_t get_rx_bandwidth_range(size_t chan) {
+		meta_range_t range(0, 2, 0.1);
+		return range;
+	}
+
+	gain_range_t get_rx_gain_range(const std::string &name, size_t chan) {
+		gain_range_t range(0, 1, 0.1);
+		return range;
+	}
+
+	std::vector<std::string> get_rx_gain_names(size_t chan) {
+		std::vector<std::string> names;
+		return names;
+	}
+
+	std::vector<std::string> get_rx_antennas(size_t chan) {
+		std::vector<std::string> antennas;
+		return antennas;
+	}
+
+	std::string get_time_source(const size_t mboard) {
+		return "";
 	}
 };
 

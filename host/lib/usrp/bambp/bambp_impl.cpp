@@ -46,11 +46,15 @@ device_addrs_t bambp_find(const device_addr_t &hint_)
 	char sVal[256];
 	BRD_Info rBrdInfo;
 	string sSerial;
+	string sType;
 
-	if((hint_.size() > 0) && !hint_.has_key("serial"))
+	if((hint_.size() > 0) 
+		&& !hint_.has_key("serial")
+		&& !hint_.has_key("type"))
 		return addrs;
 
 	sSerial = hint_.get("serial", "");
+	sType = hint_.get("type", "");
 
 	err = BRD_initEx(0, 0, 0, &nNum);
 
@@ -88,14 +92,18 @@ device_addrs_t bambp_find(const device_addr_t &hint_)
 
 		addr["serial"] = to_string(rBrdInfo.pid);
 
-		BRDC_bcstombs(sVal, rBrdInfo.name, 256);
-		addr["name"] = sVal;
-		
 		if(!sSerial.empty() && (sSerial != addr["serial"]))
 			continue;
 
-		addr["lid"] = to_string(pLidList[i]);;
+		BRDC_bcstombs(sVal, rBrdInfo.name, 256);
+		addr["name"] = sVal;
+		addr["type"] = sVal;
 
+		if(!sType.empty() && (sType != addr["type"]))
+			continue;
+
+		addr["lid"] = to_string(pLidList[i]);
+		
 		addrs.push_back(addr);
 	}
 
